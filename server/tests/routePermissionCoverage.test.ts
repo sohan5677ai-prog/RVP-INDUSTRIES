@@ -57,6 +57,9 @@ const KNOWN_PUBLIC = new Set([
   'GET /api/webhooks/gps',
   'POST /api/webhooks/gps',
   'POST /api/weighbridge/cctv/broadcast',
+  // The bridge's idle "should I send pictures?" check. Same bridge key as the
+  // broadcast, verified inside the handler.
+  'GET /api/weighbridge/cctv/demand',
   'GET /api/weighbridge/tickets/:id/slip.pdf',
   'GET /api/weighbridge/tickets/:id/slip.jpg',
   // Stored supplier invoices, kata slips and screenshots. Public in the sense

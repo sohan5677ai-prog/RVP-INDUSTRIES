@@ -8,8 +8,10 @@ import { getCameraPreview } from '../lib/cctvPreview.js';
 import { isTrustedCameraBridge } from '../lib/cameraBridgeKey.js';
 import {
   markViewerInterest,
-  markAllViewerInterest,
   getRelayDirective,
+  noteScaleWeight,
+  noteScaleOffline,
+  markBridgeSeen,
 } from '../lib/cctvRelayDemand.js';
 import { streamCameraMjpeg, getCameraSnapshotWithMeta, setCameraBroadcast, getCctvStatus } from '../lib/cctvService.js';
 import { saveWeighbridgeSnapshot, getLocalSnapshotPath } from '../lib/weighbridgePhotoService.js';
@@ -1434,14 +1436,23 @@ export async function broadcastCctvHandler(req: Request, res: Response) {
   if (!isTrustedCameraBridge(req)) {
     throw new HttpError(401, 'Untrusted CCTV bridge');
   }
-  const { cam, image } = req.body;
-  const camNum = cam === 2 || cam === '2' ? 2 : 1;
-  if (!image || typeof image !== 'string') {
-    throw new HttpError(400, 'Base64 image string is required');
+  // A current bridge posts the JPEG as raw bytes (Content-Type: image/jpeg,
+  // camera in `?cam=`), which this process holds exactly once. An older bridge
+  // still posts base64 inside JSON, held as text, parsed object and decoded
+  // bytes - accepted until every cabin PC runs the new bridge.
+  let camNum: 1 | 2;
+  let buf: Buffer;
+  if (Buffer.isBuffer(req.body)) {
+    camNum = String(req.query.cam) === '2' ? 2 : 1;
+    buf = req.body;
+  } else {
+    const { cam, image } = req.body ?? {};
+    camNum = cam === 2 || cam === '2' ? 2 : 1;
+    if (!image || typeof image !== 'string') {
+      throw new HttpError(400, 'Base64 image string is required');
+    }
+    buf = Buffer.from(image.replace(/^data:image\/\w+;base64,/, ''), 'base64');
   }
-
-  const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, '');
-  const buf = Buffer.from(cleanBase64, 'base64');
   if (buf.length < 200) {
     throw new HttpError(400, 'Invalid image buffer size');
   }
@@ -1470,14 +1481,28 @@ export async function broadcastCctvHandler(req: Request, res: Response) {
  * Diagnostic status endpoint for cameras & bridge health.
  */
 export async function getCctvStatusHandler(_req: Request, res: Response) {
-  // The Weighbridge screen polls this every 5s and - unlike the frames - it
-  // still comes to the cloud even when the cabin PC is pulling pictures off
-  // its local bridge. So it is our one dependable signal that a Kata screen is
-  // open somewhere, and it is what keeps the relay warm for ticket capture.
-  markAllViewerInterest();
+  // Deliberately NOT a viewer signal any more. The Weighbridge screen polls
+  // this all day, and treating that as "watching" kept both cameras uploading
+  // every second for as long as the screen was open. A lorry on the scale now
+  // turns the relay on for ticket photos - see lib/cctvRelayDemand.ts.
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json(getCctvStatus());
+}
+
+/**
+ * The bridge's "should I be sending pictures?" check.
+ *
+ * Polled every few seconds by cctv-bridge.mjs while it is idle, in place of
+ * uploading a picture just to hear the answer. A few hundred bytes each way.
+ */
+export async function getCctvDemandHandler(req: Request, res: Response) {
+  if (!isTrustedCameraBridge(req)) {
+    throw new HttpError(401, 'Untrusted CCTV bridge');
+  }
+  markBridgeSeen();
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.json({ cams: { 1: getRelayDirective(1), 2: getRelayDirective(2) } });
 }
 
 /**
@@ -1565,7 +1590,10 @@ export async function broadcastScaleReadingHandler(req: Request, res: Response) 
 
   if (isConnected === false) {
     service.reportClientDisconnect(error);
+    noteScaleOffline();
   } else {
+    // A lorry driving onto the scale is what switches the cameras on.
+    noteScaleWeight(Number(liveWeight));
     service.updateClientReading({
       liveWeight: Number(liveWeight),
       isStable: !!isStable,

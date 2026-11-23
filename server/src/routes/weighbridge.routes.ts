@@ -14,6 +14,7 @@ import {
   snapshotCctvHandler,
   broadcastCctvHandler,
   getCctvStatusHandler,
+  getCctvDemandHandler,
   getStoredSnapshotHandler,
   queuePrintJobHandler,
   getPendingPrintJobsHandler,
@@ -32,6 +33,7 @@ const router = Router();
 router.get('/cctv/stream', asyncHandler(streamCctvHandler));
 router.get('/cctv/snapshot', asyncHandler(snapshotCctvHandler));
 router.post('/cctv/broadcast', asyncHandler(broadcastCctvHandler));
+router.get('/cctv/demand', asyncHandler(getCctvDemandHandler));
 router.get('/cctv/status', asyncHandler(getCctvStatusHandler));
 router.get('/snapshots/:filename', asyncHandler(getStoredSnapshotHandler));
 

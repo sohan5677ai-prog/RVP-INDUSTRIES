@@ -33,7 +33,11 @@ type ScaleListener = (reading: ScaleReading) => void;
 const DLC_COOLDOWN_MS = 30_000;
 
 class ServerScaleService {
-  private localEnabled = process.env.SCALE_LOCAL_ENABLED?.toLowerCase() !== 'false';
+  // No COM port exists on Render (it sets RENDER=true), so opening one there is
+  // a retry loop that can only fail. Readings arrive from the cabin terminal.
+  private localEnabled = process.env.SCALE_LOCAL_ENABLED
+    ? process.env.SCALE_LOCAL_ENABLED.toLowerCase() !== 'false'
+    : !process.env.RENDER;
   private connectionFailureReported = false;
   private portName: string = process.env.SCALE_COM_PORT || 'COM4';
   private baudRate: number = Number(process.env.SCALE_BAUD_RATE || 2400);

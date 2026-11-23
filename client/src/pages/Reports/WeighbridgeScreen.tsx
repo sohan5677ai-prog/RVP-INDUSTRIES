@@ -244,7 +244,9 @@ interface CctvLiveBoxProps {
 interface CctvCameraStatus {
   cam: number;
   online: boolean;
-  source: 'CLOUD_RELAY' | 'SERVER_LAN' | 'OFFLINE';
+  /** Bridge alive, but no lorry on the scale and nobody watching remotely - the relay is deliberately off. */
+  standby?: boolean;
+  source: 'CLOUD_RELAY' | 'SERVER_LAN' | 'STANDBY' | 'OFFLINE';
   relayOnline: boolean;
   lastSeen: number | null;
   ageMs: number | null;
@@ -348,7 +350,9 @@ function CctvLiveBox({ paused = false, camNumber, cameraIp, label, refreshTrigge
           "text-[8px] font-mono px-1 py-0.2 rounded border font-semibold",
           relayStatus?.online ? "bg-blue-950/80 text-blue-300 border-blue-800/60" : "bg-rose-950/80 text-rose-300 border-rose-800/60"
         )}>
-          {relayStatus?.online
+          {relayStatus?.standby
+            ? 'CLOUD · STANDBY'
+            : relayStatus?.online
             ? `CLOUD · ${Math.max(0, Math.round((relayStatus.ageMs || 0) / 1000))}s`
             : 'CLOUD OFFLINE'}
         </span>
@@ -3529,7 +3533,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
               <div>
                 <span className="font-bold">{bothCamerasOnline ? 'CCTV cloud relay active:' : 'CCTV cloud relay offline:'}</span>{' '}
                 {bothCamerasOnline
-                  ? 'Both cabin cameras are sending fresh frames to the ERP cloud, so remote ticket snapshots are available.'
+                  ? 'The cabin bridge is connected. Cameras send pictures to the cloud only while a lorry is on the weighbridge or someone is watching remotely, and stay on standby otherwise.'
                   : 'The cloud is not receiving fresh frames from both cameras. Check the cabin bridge status before relying on remote snapshots.'}
               </div>
             </div>
@@ -3543,7 +3547,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     CAM 1: ENTRY (192.168.1.101)
                   </span>
                   <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
-                    {cctvStatus?.cam1.online ? 'Cloud relay online' : 'Offline'}
+                    {cctvStatus?.cam1.standby ? 'Standby - turns on when a lorry is on the scale' : cctvStatus?.cam1.online ? 'Cloud relay online' : 'Offline'}
                   </Badge>
                 </div>
                 <div className="space-y-1">
@@ -3568,7 +3572,7 @@ export default function WeighbridgeScreen({ cabinMode = false }: { cabinMode?: b
                     CAM 2: EXIT (192.168.1.102)
                   </span>
                   <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
-                    {cctvStatus?.cam2.online ? 'Cloud relay online' : 'Offline'}
+                    {cctvStatus?.cam2.standby ? 'Standby - turns on when a lorry is on the scale' : cctvStatus?.cam2.online ? 'Cloud relay online' : 'Offline'}
                   </Badge>
                 </div>
                 <div className="space-y-1">

@@ -91,6 +91,9 @@ app.use(
 const CAMERA_FRAME_PATHS = [
   '/api/weighbridge/cctv/broadcast',
 ];
+// A current bridge sends the JPEG as raw bytes: one Buffer, nothing to decode.
+app.use(CAMERA_FRAME_PATHS, express.raw({ type: 'image/jpeg', limit: '5mb' }));
+// An older bridge still sends base64 in JSON.
 app.use(CAMERA_FRAME_PATHS, express.json({ limit: '15mb' }));
 
 /**
@@ -184,6 +187,10 @@ app.get("/api/weighbridge/cctv/stream", requireMediaRead, (req, res, next) => {
 app.post("/api/weighbridge/cctv/broadcast", (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.broadcastCctvHandler(req, res)).catch(next);
 });
+// The bridge's idle demand check. Verifies the bridge key itself, inside the handler.
+app.get("/api/weighbridge/cctv/demand", (req, res, next) => {
+  import("./controllers/weighbridge.controller.js").then((m) => m.getCctvDemandHandler(req, res)).catch(next);
+});
 app.get("/api/weighbridge/cctv/status", requireMediaRead, (req, res, next) => {
   import("./controllers/weighbridge.controller.js").then((m) => m.getCctvStatusHandler(req, res)).catch(next);
 });
@@ -235,6 +242,18 @@ app.use(errorHandler);
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, "0.0.0.0", () => {
   logger.info(`rvp-server listening on http://localhost:${port}`);
+
+  // Memory telemetry. Render kills the process at 512 MB with no word on what
+  // was using it; this line in the logs says which bucket grew. rss is what
+  // Render counts; heapUsed is JS objects; external/arrayBuffers are Buffers,
+  // camera frames and libvips; the rest of rss is Prisma's engine and Node.
+  const mb = (n: number) => Math.round(n / 1048576);
+  setInterval(() => {
+    const m = process.memoryUsage();
+    const line = `[memory] rss=${mb(m.rss)}MB heapUsed=${mb(m.heapUsed)}MB heapTotal=${mb(m.heapTotal)}MB external=${mb(m.external)}MB arrayBuffers=${mb(m.arrayBuffers)}MB`;
+    if (m.rss > 420 * 1048576) logger.warn(line);
+    else logger.info(line);
+  }, 5 * 60_000).unref();
 
   // Bootstrap missing accounts. (40040 Internal Weight Profit was decommissioned.)
   //

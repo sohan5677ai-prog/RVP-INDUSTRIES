@@ -461,7 +461,7 @@ export default function Transports() {
 
       {/* Add / Edit Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] max-w-5xl sm:max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? 'Edit Transport' : 'Add Transport'}</DialogTitle>
           </DialogHeader>
@@ -570,11 +570,19 @@ export default function Transports() {
                     No flat rates agreed with this agency.
                   </p>
                 ) : (
-                  <div className="mt-3 space-y-2">
+                  <div className="mt-3 space-y-2 overflow-x-auto">
+                    <div className="grid min-w-[680px] grid-cols-[minmax(200px,1fr)_130px_130px_120px_110px_36px] gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <span>Destination</span>
+                      <span>Full lorry ₹</span>
+                      <span>30 t lorry ₹</span>
+                      <span>₹/t under 30</span>
+                      <span>Lorry size kg</span>
+                      <span />
+                    </div>
                     {rateRows.map((row, i) => (
                       <div
                         key={i}
-                        className="grid grid-cols-[1fr_110px_110px_100px_100px_36px] items-center gap-2"
+                        className="grid min-w-[680px] grid-cols-[minmax(200px,1fr)_130px_130px_120px_110px_36px] items-center gap-2"
                       >
                         <Input
                           value={row.destination}

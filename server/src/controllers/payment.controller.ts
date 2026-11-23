@@ -545,12 +545,29 @@ export async function createPayment(req: Request, res: Response) {
       name = data.payee || cleanDescription || `${data.type} payment`;
     }
 
+    // Sree Madhupuri Transport only: the receipt's Ref line carries the lorries
+    // this transfer paid, e.g. "UBINL263245 (GJ18BV3060, GJ18BV5741)", so the
+    // owner can see which trips it settles. Message-only - the stored UTR on
+    // the payment stays clean for bank matching.
+    let waReference = data.reference ?? null;
+    if (agency && /madhupuri/i.test(agency.name) && data.dispatchIds?.length) {
+      const trips = await prisma.saleDispatch.findMany({
+        where: { id: { in: data.dispatchIds }, agencyPaymentId: payment.id },
+        select: { vehicleNumber: true, dispatchDate: true },
+        orderBy: { dispatchDate: 'asc' },
+      }).catch(() => []);
+      const lorries = [...new Set(trips.map((t) => t.vehicleNumber?.trim().toUpperCase()).filter(Boolean))];
+      if (lorries.length) {
+        waReference = `${waReference ? `${waReference} ` : ''}(${lorries.join(', ')})`;
+      }
+    }
+
     await whatsappService.notifyPaymentSent(
       {
         id: payment.id,
         amount: Number(data.amount),
         date: data.date,
-        reference: data.reference ?? null,
+        reference: waReference,
         screenshotUrl,
       },
       { name, phone, phone2, waLanguage },

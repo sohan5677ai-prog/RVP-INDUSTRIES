@@ -17,18 +17,18 @@
  *      left parked on the scale stops the relay after PARKED_MS of a steady
  *      weight, and the next change in weight starts it again.
  *
- *   2. Somebody away from the cabin is looking at a camera box - a cloud
- *      snapshot or stream request. The cabin PC reads its cameras off the LAN
- *      bridge and never asks the cloud, so it does not count, and neither does
- *      the Weighbridge screen's status poll any more.
+ * That is the ONLY trigger. Opening a camera box (cloud snapshot/stream) used
+ * to switch the relay on too, but any office PC or phone with a camera box
+ * open - or a cabin browser that could not reach the LAN bridge and fell back
+ * to the cloud - re-armed it every 5 s and kept pictures going up all day with
+ * the scale empty. A remote viewer now sees the last picture from the last
+ * weighing. Viewer requests are still counted (idleForMs) for diagnostics.
  *
  * Otherwise the bridge sends no pictures at all. It asks GET /cctv/demand every
  * few seconds instead - a few hundred bytes, no image - which is how it hears
  * that a lorry has arrived or a viewer has opened a camera.
  */
 
-/** How long one cloud snapshot request keeps that camera's relay on. */
-export const VIEWER_TTL_MS = Number(process.env.CCTV_VIEWER_TTL_MS || 20_000);
 /** Upload interval while the relay is on. The camera boxes refresh every 5 s. */
 export const ACTIVE_INTERVAL_MS = Number(process.env.CCTV_ACTIVE_INTERVAL_MS || 2_000);
 /**
@@ -45,7 +45,7 @@ export const WEIGHT_MOVEMENT_KG = Number(process.env.CCTV_WEIGHT_MOVEMENT_KG || 
 /** Keep the cameras on this long after the lorry drives off - covers Save and the slip. */
 export const LORRY_TAIL_MS = Number(process.env.CCTV_LORRY_TAIL_MS || 90_000);
 /** A weight that has not moved for this long is a parked lorry: stop until it moves. */
-export const PARKED_MS = Number(process.env.CCTV_PARKED_MS || 10 * 60_000);
+export const PARKED_MS = Number(process.env.CCTV_PARKED_MS || 2 * 60_000);
 
 const lastInterestAt: Record<1 | 2, number> = { 1: 0, 2: 0 };
 
@@ -58,7 +58,7 @@ const scale = {
   leftAt: 0,
 };
 
-/** Record that a remote viewer asked to see this camera. */
+/** Record that a remote viewer asked to see this camera. Diagnostic only: it does not wake the relay. */
 export function markViewerInterest(cam: 1 | 2, now = Date.now()): void {
   lastInterestAt[cam] = now;
 }
@@ -95,13 +95,10 @@ export function isWeighingActive(now = Date.now()): boolean {
   return scale.leftAt > 0 && now - scale.leftAt < LORRY_TAIL_MS;
 }
 
-export type RelayReason = 'WEIGHING' | 'VIEWER' | null;
+export type RelayReason = 'WEIGHING' | null;
 
-function reasonFor(cam: 1 | 2, now: number): RelayReason {
-  if (isWeighingActive(now)) return 'WEIGHING';
-  const last = lastInterestAt[cam];
-  if (last > 0 && now - last < VIEWER_TTL_MS) return 'VIEWER';
-  return null;
+function reasonFor(_cam: 1 | 2, now: number): RelayReason {
+  return isWeighingActive(now) ? 'WEIGHING' : null;
 }
 
 export function isRelayWanted(cam: 1 | 2, now = Date.now()): boolean {
@@ -111,7 +108,7 @@ export function isRelayWanted(cam: 1 | 2, now = Date.now()): boolean {
 export interface RelayDirective {
   /** Whether the bridge should be sending pictures for this camera. */
   wanted: boolean;
-  /** Why: a lorry on the weighbridge, or a remote viewer. Null when idle. */
+  /** Why: a lorry on the weighbridge. Null when idle. */
   reason: RelayReason;
   /** How long the bridge should wait before its next upload for this camera. */
   intervalMs: number;

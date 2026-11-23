@@ -392,6 +392,20 @@ export async function createPayment(req: Request, res: Response) {
       },
     });
 
+    // Tick the selected trips off as paid by this agency payment. Only the
+    // agency's own trips may be tagged (older trips carry the agency only by
+    // provider name, so an empty transportId is allowed too), so a stale id
+    // can't mark another agency's lorry as settled.
+    if (data.transportId && data.dispatchIds?.length) {
+      await tx.saleDispatch.updateMany({
+        where: {
+          id: { in: data.dispatchIds },
+          OR: [{ transportId: data.transportId }, { transportId: null }],
+        },
+        data: { agencyPaymentId: created.id },
+      });
+    }
+
     await LedgerService.postPayment(tx, created.id, {
       date: data.date,
       amount: data.amount,
@@ -708,6 +722,12 @@ export async function deletePayment(req: Request, res: Response) {
     id: payment.id,
     reason,
     actor: { userId: req.user.userId, name: actor?.name ?? null },
+  });
+
+  // A cancelled agency payment no longer pays anything: its trips go back to unpaid.
+  await prisma.saleDispatch.updateMany({
+    where: { agencyPaymentId: payment.id },
+    data: { agencyPaymentId: null },
   });
 
   res.json({ message: 'Payment cancelled and reversed' });

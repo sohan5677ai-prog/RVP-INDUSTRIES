@@ -32,3 +32,18 @@ export const SERVICE_SESSION_ID = 'service';
 export function liveSessionCutoff(now: Date = new Date()): Date {
   return new Date(now.getTime() - IDLE_TIMEOUT_MS - SESSION_GRACE_MS);
 }
+
+/**
+ * A session the user marked "Remember this device" (UserSession.trustedAt).
+ * It is exempt from the idle cutoff - the browser pauses instead of signing
+ * out, and resumes with the stored refresh token - and is bounded only by its
+ * absolute expiry (TRUSTED_SESSION_TTL_MS in tokens.ts). A paused tab sends
+ * no requests, so this costs the server nothing while idle.
+ */
+export function sessionIsIdleExpired(
+  session: { lastSeenAt: Date; trustedAt: Date | null },
+  now: Date = new Date()
+): boolean {
+  if (session.trustedAt) return false;
+  return session.lastSeenAt < liveSessionCutoff(now);
+}

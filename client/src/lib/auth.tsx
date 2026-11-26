@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { api, getToken } from './api';
-import { clearSession, setSession } from './apiBase';
-import { clearMediaToken } from './mediaToken';
+import { clearSession, isTrustedDevice, setSession } from './apiBase';
+import { clearMediaToken, ensureMediaToken } from './mediaToken';
 import { getDeviceId } from './device';
 import { startIdleWatch, markActivity } from './idle';
 import type { User } from './types';
@@ -12,6 +12,8 @@ interface SessionResponse {
   token: string;
   refreshToken?: string;
   expiresAt?: string;
+  /** True for a "Remember this device" session. */
+  trusted?: boolean;
   user: User;
 }
 
@@ -41,6 +43,13 @@ interface AuthState {
   refreshUser: () => Promise<void>;
   /** Replace the stored session after an endpoint hands back a new pair. */
   adoptSession: (res: SessionResponse) => void;
+  /**
+   * A remembered device that sat idle past the window. The app is unmounted
+   * (so every poll and stream stops and the server can sleep) but the session
+   * is kept; resume() brings it back without a password.
+   */
+  paused: boolean;
+  resume: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
@@ -48,6 +57,7 @@ const AuthContext = createContext<AuthState | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [paused, setPaused] = useState(false);
 
   // On mount, if we have a token, fetch the current user. api() will quietly
   // refresh the access token first if it has expired, so a browser left closed
@@ -68,8 +78,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const adoptSession = useCallback((res: SessionResponse) => {
-    setSession(res.token, res.refreshToken);
+    setSession(res.token, res.refreshToken, res.trusted);
     markActivity();
+    setPaused(false);
     setUser(res.user);
   }, []);
 
@@ -119,8 +130,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // The media capability token is only re-mintable while signed in, and it
     // must not outlive the session in localStorage.
     clearMediaToken();
+    setPaused(false);
     setUser(null);
   }, []);
+
+  // One request on the user's click: api() trades the stored refresh token for
+  // a fresh access token if the old one has lapsed, then the app remounts.
+  const resume = useCallback(async () => {
+    try {
+      const res = await api<{ user: User }>('/auth/me');
+      markActivity();
+      setUser(res.user);
+      setPaused(false);
+      void ensureMediaToken();
+    } catch {
+      logout();
+      toast.info('Your session has ended. Please sign in again.');
+    }
+  }, [logout]);
 
   // The server can end a session out from under us (signed out elsewhere, the
   // idle window lapsed, the password changed, the account was disabled). api()
@@ -131,11 +158,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('auth:unauthorized', onUnauthorized);
   }, []);
 
-  // Idle sign-out, armed only while someone is signed in.
+  // Idle sign-out, armed only while someone is signed in. A remembered device
+  // pauses instead: no password next time, and no traffic while it waits.
   useEffect(() => {
-    if (!user) return;
+    if (!user || paused) return;
     return startIdleWatch({
       onIdle: () => {
+        if (isTrustedDevice()) {
+          // Drops the scale stream, which lives outside the protected routes.
+          clearMediaToken();
+          setPaused(true);
+          return;
+        }
         logout();
         toast.info('Signed out after 20 minutes of inactivity.');
       },
@@ -143,11 +177,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         api('/auth/heartbeat', { method: 'POST' }).catch(() => {});
       },
     });
-  }, [user, logout]);
+  }, [user, paused, logout]);
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, completeMfa, logout, refreshUser, adoptSession }}
+      value={{
+        user,
+        loading,
+        login,
+        completeMfa,
+        logout,
+        refreshUser,
+        adoptSession,
+        paused,
+        resume,
+      }}
     >
       {children}
     </AuthContext.Provider>

@@ -12,7 +12,7 @@ import {
   IDLE_TIMEOUT_MS,
   LAST_SEEN_WRITE_INTERVAL_MS,
   SERVICE_SESSION_ID,
-  liveSessionCutoff,
+  sessionIsIdleExpired,
 } from '../lib/sessionPolicy.js';
 
 // Augment Express Request with the authenticated user.
@@ -94,6 +94,7 @@ async function authenticate(req: Request): Promise<void> {
     select: {
       id: true,
       lastSeenAt: true,
+      trustedAt: true,
       absoluteExpiresAt: true,
       user: {
         select: { passwordChangedAt: true, disabledAt: true, role: true, mustChangePassword: true },
@@ -130,7 +131,8 @@ async function authenticate(req: Request): Promise<void> {
 
   // Belt-and-braces for the browser's own idle timer: a tab that sat quiet past
   // the idle window doesn't get to pick up where it left off.
-  if (session.lastSeenAt < liveSessionCutoff(nowDate)) {
+  // Remembered devices are exempt - see sessionIsIdleExpired.
+  if (sessionIsIdleExpired(session, nowDate)) {
     await dropSession(session.id);
     throw new HttpError(401, 'Signed out after a period of inactivity. Please sign in again.');
   }

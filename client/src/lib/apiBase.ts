@@ -19,6 +19,8 @@ export const API_BASE = (
 const TOKEN_KEY = 'rvp_token';
 const REFRESH_KEY = 'rvp_refresh';
 const DEVICE_KEY = 'rvp_device_id';
+/** Set when the server says this session is a "Remember this device" one. */
+const TRUSTED_KEY = 'rvp_trusted_device';
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -37,14 +39,25 @@ export function getRefreshToken(): string | null {
 }
 
 /** Store both halves of a freshly issued pair. */
-export function setSession(token: string, refreshToken?: string | null) {
+export function setSession(token: string, refreshToken?: string | null, trusted?: boolean) {
   setToken(token);
   if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken);
+  if (trusted === true) localStorage.setItem(TRUSTED_KEY, '1');
+  else if (trusted === false) localStorage.removeItem(TRUSTED_KEY);
 }
 
 export function clearSession() {
   clearToken();
   localStorage.removeItem(REFRESH_KEY);
+  localStorage.removeItem(TRUSTED_KEY);
+}
+
+/**
+ * Remembered devices pause after the idle window instead of signing out, and
+ * resume without a password (the server exempts them from its idle cutoff).
+ */
+export function isTrustedDevice(): boolean {
+  return localStorage.getItem(TRUSTED_KEY) === '1';
 }
 
 /**
@@ -88,9 +101,13 @@ export function refreshAccessToken(): Promise<string | null> {
   })
     .then(async (res) => {
       if (!res.ok) return null;
-      const data = (await res.json()) as { token?: string; refreshToken?: string };
+      const data = (await res.json()) as {
+        token?: string;
+        refreshToken?: string;
+        trusted?: boolean;
+      };
       if (!data.token) return null;
-      setSession(data.token, data.refreshToken);
+      setSession(data.token, data.refreshToken, data.trusted);
       return data.token;
     })
     .catch(() => null)

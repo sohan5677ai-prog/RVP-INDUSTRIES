@@ -19,6 +19,7 @@ import {
   MAX_DEVICES_PER_USER,
   SERVICE_SESSION_ID,
   liveSessionCutoff,
+  sessionIsIdleExpired,
 } from '../lib/sessionPolicy.js';
 import { forgetSession, touchSession } from '../middleware/auth.js';
 import {
@@ -330,8 +331,15 @@ async function establishSession(params: {
 
   // Sessions that have gone quiet past the idle window are dead - drop them so
   // a closed laptop or a lost phone stops holding one of the device slots.
+  // Remembered devices survive idleness and die only at their absolute expiry.
   await prisma.userSession.deleteMany({
-    where: { userId: user.id, lastSeenAt: { lt: liveSessionCutoff(now) } },
+    where: {
+      userId: user.id,
+      OR: [
+        { trustedAt: null, lastSeenAt: { lt: liveSessionCutoff(now) } },
+        { absoluteExpiresAt: { lte: now } },
+      ],
+    },
   });
 
   const existing = await prisma.userSession.findUnique({
@@ -339,9 +347,13 @@ async function establishSession(params: {
   });
 
   // A developer account is support staff and has to be able to sign in from
-  // wherever the problem is; every other role is capped.
+  // wherever the problem is; every other role is capped. The cap is on devices
+  // in use right now: a remembered device that is paused (idle past the
+  // window) does not hold a slot.
   if (!existing && user.role !== 'DEVELOPER') {
-    const live = await prisma.userSession.count({ where: { userId: user.id } });
+    const live = await prisma.userSession.count({
+      where: { userId: user.id, lastSeenAt: { gte: liveSessionCutoff(now) } },
+    });
     if (live >= MAX_DEVICES_PER_USER) {
       await recordLoginAttempt({
         username: user.username,
@@ -357,6 +369,13 @@ async function establishSession(params: {
   }
 
   const isNewDevice = !existing;
+  // Ticking "Remember" on a device that was not remembered starts the longer
+  // 30-day clock; otherwise a re-login keeps the session's original cap.
+  const becomesTrusted = Boolean(params.remember) && !existing?.trustedAt;
+  const absoluteExpiresAt =
+    existing && !becomesTrusted
+      ? existing.absoluteExpiresAt
+      : absoluteExpiryFrom(now, Boolean(params.remember || existing?.trustedAt));
 
   const session = existing
     ? await prisma.userSession.update({
@@ -365,6 +384,7 @@ async function establishSession(params: {
           lastSeenAt: now,
           userAgent,
           ip,
+          absoluteExpiresAt,
           ...(params.remember ? { trustedAt: existing.trustedAt ?? now } : {}),
         },
       })
@@ -374,7 +394,7 @@ async function establishSession(params: {
           deviceId,
           userAgent,
           ip,
-          absoluteExpiresAt: absoluteExpiryFrom(now),
+          absoluteExpiresAt,
           ...(params.remember ? { trustedAt: now } : {}),
         },
       });
@@ -385,10 +405,10 @@ async function establishSession(params: {
     user,
     sessionId: session.id,
     mfaSatisfied: params.mfaSatisfied,
-    // A fresh sign-in restarts the 12-hour clock; signing in again on a device
-    // that already has a live session does not extend it beyond its original
-    // cap unless this is a new session row.
-    absoluteExpiresAt: existing?.absoluteExpiresAt ?? absoluteExpiryFrom(now),
+    // A fresh sign-in starts the 12-hour clock (30 days when remembered);
+    // signing in again on a device that already has a live session does not
+    // extend it unless that sign-in is what makes the device remembered.
+    absoluteExpiresAt,
     now,
   });
 
@@ -411,6 +431,7 @@ async function establishSession(params: {
     token: tokens.accessToken,
     refreshToken: tokens.refreshToken,
     expiresAt: tokens.absoluteExpiresAt.toISOString(),
+    trusted: Boolean(session.trustedAt),
     user: shapeUser(user),
   };
 }
@@ -450,7 +471,7 @@ export async function refresh(req: Request, res: Response) {
     forgetSession(session.id);
     throw new HttpError(401, 'Session expired. Please sign in again.');
   }
-  if (session.lastSeenAt < liveSessionCutoff(now)) {
+  if (sessionIsIdleExpired(session, now)) {
     await prisma.userSession.deleteMany({ where: { id: session.id } });
     forgetSession(session.id);
     throw new HttpError(401, 'Signed out after a period of inactivity. Please sign in again.');
@@ -468,6 +489,7 @@ export async function refresh(req: Request, res: Response) {
     token: tokens.accessToken,
     refreshToken: tokens.refreshToken,
     expiresAt: tokens.absoluteExpiresAt.toISOString(),
+    trusted: Boolean(session.trustedAt),
     user: shapeUser(session.user),
   });
 }

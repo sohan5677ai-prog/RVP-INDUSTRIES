@@ -26,6 +26,8 @@ import { HttpError } from './httpError.js';
 export const ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000;
 /** Hard cap on a session's life, however active it is (plan item 1.5). */
 export const ABSOLUTE_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+/** Cap for a "Remember this device" session: sign in again after 30 days. */
+export const TRUSTED_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** A refresh token outlives the access token but not the session. */
 export const REFRESH_TOKEN_BYTES = 32;
 
@@ -134,6 +136,6 @@ export function tokenPredatesPasswordChange(
 }
 
 /** When a session started now must end regardless of activity. */
-export function absoluteExpiryFrom(now: Date = new Date()): Date {
-  return new Date(now.getTime() + ABSOLUTE_SESSION_TTL_MS);
+export function absoluteExpiryFrom(now: Date = new Date(), trusted = false): Date {
+  return new Date(now.getTime() + (trusted ? TRUSTED_SESSION_TTL_MS : ABSOLUTE_SESSION_TTL_MS));
 }

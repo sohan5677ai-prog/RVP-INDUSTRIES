@@ -86,6 +86,8 @@ export interface AuditSignal {
   action: string;
   entityLabel: string | null;
   userName: string | null;
+  /** Needed to tell a role *change* from a row that merely mentions a role. */
+  oldValues: unknown;
   newValues: unknown;
   createdAt: Date;
 }
@@ -177,23 +179,54 @@ export function oddHourLogins(signals: Signals, t: Thresholds, now: Date): RuleA
   return out;
 }
 
-/** A role change, or an account appearing with a privileged role. */
+const PRIVILEGED = ['OWNER', 'ADMIN', 'DEVELOPER'];
+
+/**
+ * A role actually CHANGING, or an account appearing with a privileged role.
+ *
+ * The first version of this fired whenever a `user.update` row *mentioned* a
+ * privileged role - and the audit row carries the whole user record, so every
+ * login by an owner raised a "privilege change". It was raising alerts about
+ * `lastLoginAt` within hours of deploying, which is the noise failure this
+ * phase was written to avoid, committed by this phase.
+ *
+ * So it compares the before and after. A row where the role is the same is not
+ * a role change, whatever else it touched.
+ */
 export function privilegeChanges(signals: Signals): RuleAlert[] {
   const out: RuleAlert[] = [];
   for (const a of signals.recentAudit) {
-    if (a.action !== 'user.update' && a.action !== 'user.create') continue;
-    const values = (a.newValues ?? {}) as Record<string, unknown>;
-    const role = typeof values.role === 'string' ? values.role : null;
-    if (!role || !['OWNER', 'ADMIN', 'DEVELOPER'].includes(role)) continue;
+    const after = (a.newValues ?? {}) as Record<string, unknown>;
+    const before = (a.oldValues ?? {}) as Record<string, unknown>;
+    const role = typeof after.role === 'string' ? after.role : null;
+    const wasRole = typeof before.role === 'string' ? before.role : null;
+    const who = String(after.username ?? a.entityLabel ?? 'unknown');
+
+    if (a.action === 'user.create') {
+      if (!role || !PRIVILEGED.includes(role)) continue;
+      out.push({
+        rule: 'user.privileged_change',
+        subject: who,
+        severity: 'WARNING',
+        title: `New ${role} account: ${who}`,
+        detail: { role, by: a.userName, action: a.action },
+      });
+      continue;
+    }
+
+    if (a.action !== 'user.update') continue;
+    // The whole point: unchanged is not a change.
+    if (!role || !wasRole || role === wasRole) continue;
+    // A demotion out of a privileged role is as notable as a promotion into
+    // one - someone losing ADMIN unexpectedly is worth seeing too.
+    if (!PRIVILEGED.includes(role) && !PRIVILEGED.includes(wasRole)) continue;
+
     out.push({
       rule: 'user.privileged_change',
-      subject: a.entityLabel ?? String(values.username ?? 'unknown'),
+      subject: who,
       severity: 'WARNING',
-      title:
-        a.action === 'user.create'
-          ? `New ${role} account: ${values.username ?? a.entityLabel}`
-          : `${values.username ?? a.entityLabel} changed, now ${role}`,
-      detail: { role, by: a.userName, action: a.action },
+      title: `${who} changed from ${wasRole} to ${role}`,
+      detail: { from: wasRole, to: role, by: a.userName },
     });
   }
   return out;

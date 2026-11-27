@@ -48,7 +48,7 @@ async function gatherSignals(now: Date): Promise<Signals> {
         createdAt: { gte: eventsSince },
         action: { in: ['user.update', 'user.create', 'data.bulk_read'] },
       },
-      select: { action: true, entityLabel: true, userName: true, newValues: true, createdAt: true },
+      select: { action: true, entityLabel: true, userName: true, oldValues: true, newValues: true, createdAt: true },
       take: 2000,
     }),
     verifyAuditChain(),

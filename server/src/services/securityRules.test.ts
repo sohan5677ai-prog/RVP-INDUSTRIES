@@ -111,15 +111,39 @@ describe('privilege changes', () => {
     action: 'user.update',
     entityLabel: 'kiran',
     userName: 'Sohan',
+    oldValues: { username: 'kiran', role: 'USER' },
     newValues: { username: 'kiran', role: 'ADMIN' },
     createdAt: minsAgo(1),
     ...over,
   });
 
-  it('fires when someone becomes ADMIN', () => {
+  /**
+   * The regression that reached production. The audit row for a login carries
+   * the WHOLE user record, role included - so a rule that asked "is the role
+   * privileged" rather than "did the role change" raised an alert every time
+   * an owner signed in. It was firing on lastLoginAt within hours.
+   */
+  it('says nothing when only lastLoginAt changed', () => {
+    const login = audit({
+      oldValues: { username: 'sohan', role: 'DEVELOPER', lastLoginAt: '2026-11-27T10:00:00Z' },
+      newValues: { username: 'sohan', role: 'DEVELOPER', lastLoginAt: '2026-11-27T16:04:38Z' },
+    });
+    expect(privilegeChanges(signals({ recentAudit: [login] }))).toEqual([]);
+  });
+
+  it('fires when someone actually becomes ADMIN', () => {
     const [a] = privilegeChanges(signals({ recentAudit: [audit()] }));
     expect(a.rule).toBe('user.privileged_change');
-    expect(a.title).toContain('ADMIN');
+    expect(a.title).toBe('kiran changed from USER to ADMIN');
+  });
+
+  it('fires on a demotion out of a privileged role too', () => {
+    // Someone losing ADMIN unexpectedly is as worth seeing as someone gaining it.
+    const a = audit({
+      oldValues: { username: 'kiran', role: 'ADMIN' },
+      newValues: { username: 'kiran', role: 'USER' },
+    });
+    expect(privilegeChanges(signals({ recentAudit: [a] }))[0]?.title).toContain('ADMIN to USER');
   });
 
   it('calls out a newly created privileged account differently', () => {
@@ -127,13 +151,16 @@ describe('privilege changes', () => {
     expect(a.title).toMatch(/^New ADMIN account/);
   });
 
-  it('says nothing about an ordinary USER', () => {
-    const a = audit({ newValues: { username: 'kiran', role: 'USER' } });
+  it('says nothing about an ordinary USER being edited', () => {
+    const a = audit({
+      oldValues: { username: 'kiran', role: 'USER' },
+      newValues: { username: 'kiran', role: 'USER', name: 'Kiran R' },
+    });
     expect(privilegeChanges(signals({ recentAudit: [a] }))).toEqual([]);
   });
 
   it('ignores audit rows that are not about users', () => {
-    const a = audit({ action: 'payment.update', newValues: { role: 'ADMIN' } });
+    const a = audit({ action: 'payment.update' });
     expect(privilegeChanges(signals({ recentAudit: [a] }))).toEqual([]);
   });
 });
@@ -143,6 +170,7 @@ describe('large exports', () => {
     action: 'data.bulk_read',
     entityLabel: null,
     userName: 'Sohan',
+    oldValues: null,
     newValues: { path: '/ledger/entries', rows },
     createdAt: minsAgo(1),
   });

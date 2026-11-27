@@ -99,9 +99,33 @@ than a heartbeat.
 | Chain afterwards | `intact, 1622 rows verified` — including the hand-written heartbeat |
 | Overview endpoint | returns the real backup file, the last prune summary, thresholds, and `alertEmailConfigured: false` |
 
+## The rule that cried wolf, within hours
+
+Deployed at 15:45. By 16:07 the production monitor had raised
+`user.privileged_change ×2 — "Sohan changed, now DEVELOPER"`.
+
+Nobody had changed a role. The audit row for a login carries the **whole** user record, `role`
+included, and the rule asked *"is the role privileged"* rather than *"did the role change"* — so
+every sign-in by an owner raised a privilege-change alert. It was firing on `lastLoginAt`.
+
+That is the precise failure this phase was written to prevent, committed by this phase, and found
+the same afternoon only because the first thing done after deploying was to look at what it had
+produced.
+
+Fixed to compare the role before and after — a row where the role is unchanged is not a role
+change, whatever else it touched. The signal now carries `oldValues` for that purpose. A demotion
+out of a privileged role fires too: someone losing ADMIN unexpectedly is as worth seeing as someone
+gaining it.
+
+The regression test uses the real shape that caused it — two records differing only in
+`lastLoginAt` — and the fix was confirmed by re-running the monitor over the same production data:
+`raised 0, resolved 0`, zero open alerts.
+
+The false alert was closed with a note saying what it was, rather than quietly deleted.
+
 ## Tests
 
-`npm test` in `server/` — **83 files, 951 tests.**
+`npm test` in `server/` — **83 files, 953 tests.**
 
 ## Also fixed here
 

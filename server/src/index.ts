@@ -433,6 +433,14 @@ app.listen(port, "0.0.0.0", () => {
     .then(({ registerStoragePruneCron }) => registerStoragePruneCron())
     .catch((err) => logger.error("[storage-prune] failed to register:", err));
 
+  // Hourly security monitor: failed-login bursts, privilege changes, large
+  // exports, a broken audit chain, a backup that has stopped running. Three
+  // times something was quietly wrong here and was found only because someone
+  // went looking - this is what looks.
+  import("./jobs/securityMonitorJob.js")
+    .then(({ registerSecurityMonitorCron }) => registerSecurityMonitorCron())
+    .catch((err) => logger.error("[security-monitor] failed to register:", err));
+
   // Poll the GPS provider for lorry positions. No-op without LOCANIX_API_KEY.
   // The retention sweep registers either way - pings already written still
   // have to age out, or the trail fills the database on its own.

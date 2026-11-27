@@ -40,6 +40,20 @@ export function formatIstDateTime(date: Date): string {
 }
 
 /** Numeric IST calendar fields. `month` is 1-based, so April is 4. */
+/**
+ * The hour of the day in IST, on a 24-hour clock.
+ *
+ * `istParts` reports a 12-hour clock plus AM/PM, which is right for display
+ * and wrong for any comparison. Converting it at each call site is how a
+ * midnight-versus-noon bug gets written: in 12-hour form both are "12", and
+ * the two edges convert in opposite directions.
+ */
+export function istHour24(date: Date): number {
+  const { hour, ampm } = istParts(date);
+  const h = Number(hour) % 12;
+  return ampm === 'PM' ? h + 12 : h;
+}
+
 export function istCalendar(date: Date): { year: number; month: number; day: number } {
   const p = istParts(date);
   return { year: Number(p.year), month: Number(p.month), day: Number(p.day) };

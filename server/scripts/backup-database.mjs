@@ -150,6 +150,31 @@ try {
     `retention: removed ${removed} older than ${RETENTION_DAYS}d, ${kept.length} backup(s) kept`
   );
 
+  // Record it where the SERVER can see it. The monitor runs on Render and
+  // cannot look at a OneDrive folder on this PC, so a backup that leaves no
+  // trace in the database is a backup the "no recent backup" alert can never
+  // observe - which was exactly the blind spot that let it stop for a week.
+  try {
+    const { PrismaClient } = await import('@prisma/client');
+    const prisma = new PrismaClient();
+    try {
+      const { recordBackupTaken } = await import('../dist/services/backupHeartbeat.service.js');
+      await recordBackupTaken(prisma, {
+        file: path.basename(target),
+        bytes: onDisk,
+        plainBytes: plain.length,
+        keptCount: kept.length,
+        removedCount: removed,
+      });
+      console.log('recorded in the audit trail as backup.taken');
+    } finally {
+      await prisma.$disconnect();
+    }
+  } catch (err) {
+    // A backup that cannot be recorded is still a backup. Say so and move on.
+    console.warn(`could not record the backup in the database: ${err instanceof Error ? err.message : err}`);
+  }
+
   if (kept.length === 1) {
     console.log('\nThis is the only backup. Test a restore before you rely on it:');
     console.log('  node scripts/restore-database.mjs --list');

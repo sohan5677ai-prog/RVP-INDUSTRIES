@@ -733,24 +733,24 @@ model Transport {
 /// `destination` is stored upper-cased and matched after alias folding, so the
 /// same rate answers for AHILYANAGAR and AHMEDNAGAR (one town, renamed).
 model TransportFreightRate {
-  id           String    @id @default(cuid())
-  transport    Transport @relation(fields: [transportId], references: [id], onDelete: Cascade)
-  transportId  String
-  destination  String
+  id              String    @id @default(cuid())
+  transport       Transport @relation(fields: [transportId], references: [id], onDelete: Cascade)
+  transportId     String
+  destination     String
   /// ₹ for the whole trip on a full (35 t) lorry.
-  flatAmount   Decimal   @default(0) @db.Decimal(12, 2)
+  flatAmount      Decimal   @default(0) @db.Decimal(12, 2)
   /// ₹ for the whole trip on a 30 t lorry, where the agency quotes a second
   /// flat figure for the smaller load. Null means the lane has only one flat
   /// rate and every lorry on it is paid `flatAmount`.
-  amount30     Decimal?  @db.Decimal(12, 2)
+  amount30        Decimal?  @db.Decimal(12, 2)
   /// ₹ per tonne for a part load - anything under 30 t, which is where the
   /// agreed lump sums stop and the lane goes back to being paid by weight.
   /// Null means part loads on this lane are still settled by hand.
-  perTonneBelow30 Decimal? @db.Decimal(12, 2)
+  perTonneBelow30 Decimal?  @db.Decimal(12, 2)
   /// The lorry size the top flat rate was agreed for, kept for the record only
   /// - it is never divided into. 35,000 kg for every Madhupuri lane today.
-  forTonnageKg Int?
-  updatedAt    DateTime  @updatedAt
+  forTonnageKg    Int?
+  updatedAt       DateTime  @updatedAt
 
   @@unique([transportId, destination])
 }
@@ -3410,4 +3410,51 @@ model VoidInvoiceNumber {
 
   @@unique([invoiceFy, invoiceSeq, invoiceSeries])
   @@index([invoiceFy, invoiceSeries])
+}
+
+/// Severity of a security alert. CRITICAL is reserved for things that mean
+/// the safeguards themselves have failed - a broken audit chain, a backup
+/// that has stopped running - rather than for a single suspicious event.
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+/// A raised security alert (Phase 8).
+///
+/// Stored rather than only emailed, because securityAlertEmails was unset for
+/// months: an email-only engine would have alerted nobody. A row is visible on
+/// /security whatever the mail configuration does.
+///
+/// One OPEN alert per (rule, subject): a repeat bumps `occurrences` and
+/// `lastSeenAt` instead of adding a row. Without that this becomes the noise
+/// problem that made 61% of the audit trail restart chatter and 19% of it
+/// bulk-read entries.
+model SecurityAlert {
+  id       String        @id @default(cuid())
+  /// Which check raised it, e.g. "login.failed_burst".
+  rule     String
+  /// What it is about - a username, an IP, a path. Null when the rule is
+  /// about the system as a whole, such as a stale backup.
+  subject  String?
+  severity AlertSeverity @default(WARNING)
+  title    String
+  /// Whatever the rule wants a reader to see. Never credentials.
+  detail   Json?
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  occurrences Int      @default(1)
+
+  acknowledgedAt     DateTime?
+  acknowledgedById   String?
+  acknowledgedByName String?
+  acknowledgeNote    String?
+
+  /// When an email went out, so a restart cannot re-send the same alert.
+  emailedAt DateTime?
+
+  @@index([acknowledgedAt, lastSeenAt])
+  @@index([rule, subject])
 }

@@ -141,12 +141,14 @@ function getRoundOptions(amount: number): { label: string; value: number }[] {
 // Manual hamali charge categories the crew is paid for but that can't be derived
 // from purchases/sales. Per-bag types compute amount = bags × rate; flat types
 // take a direct amount. Default per-bag rates match the mill's standard charges.
-const MANUAL_TYPES: { value: ManualHamaliType; label: string; perBag: boolean; defaultRate?: number }[] = [
+const MANUAL_TYPES: { value: ManualHamaliType; label: string; perBag: boolean; perTonne?: boolean; defaultRate?: number }[] = [
   { value: 'BAG_CUTTING_NORMAL', label: 'Bag Cutting (Place A)', perBag: true, defaultRate: 3 },
   { value: 'BAG_CUTTING_DISTANCE', label: 'Bag Cutting (Place B)', perBag: true, defaultRate: 6 },
   { value: 'PAPPU_NET', label: 'Pappu Net', perBag: true, defaultRate: 3 },
   { value: 'TPS_BROKENS_PACKING', label: 'TPS Brokens Packing', perBag: true },
   { value: 'TAMARIND_BYPRODUCTS_PACKING', label: 'Tamarind Byproducts Packing', perBag: true },
+  // Only the Pappu loads shifted mill → storage; rate from Settings → Hamali Rates.
+  { value: 'PAPPU_TRANSFER', label: 'Pappu Transfer (Mill → Storage)', perBag: false, perTonne: true, defaultRate: 270 },
   { value: 'TARBAL_FEE', label: 'Tarbal Fee', perBag: false },
   { value: 'MISC', label: 'Hamali Miscellaneous', perBag: false },
   { value: 'PAID', label: 'Paid to Hamali', perBag: false },
@@ -441,6 +443,7 @@ export default function HamaliLedger() {
   const [mBags, setMBags] = useState('');
   const [mRate, setMRate] = useState('3');
   const [mAmount, setMAmount] = useState('');
+  const [mWeightKg, setMWeightKg] = useState('');
   const [mNote, setMNote] = useState('');
 
   // Recorded-charges table filter: searchable type picker + free-text note search
@@ -448,7 +451,13 @@ export default function HamaliLedger() {
   const [chargeSearch, setChargeSearch] = useState('');
 
   const mMeta = manualTypeMeta(mType);
-  const mComputed = mMeta.perBag ? (Number(mBags) || 0) * (Number(mRate) || 0) : Number(mAmount) || 0;
+  const pappuTransferRate =
+    Number(hamaliRates?.find((r) => r.key === 'PAPPU_TRANSFER')?.ratePerTonne) || manualTypeMeta('PAPPU_TRANSFER').defaultRate!;
+  const mComputed = mMeta.perBag
+    ? (Number(mBags) || 0) * (Number(mRate) || 0)
+    : mMeta.perTonne
+      ? Math.round(((Number(mWeightKg) || 0) / 1000) * (Number(mRate) || 0) * 100) / 100
+      : Number(mAmount) || 0;
 
   function resetRecord() {
     setMDate(new Date().toISOString().slice(0, 10));
@@ -456,6 +465,7 @@ export default function HamaliLedger() {
     setMBags('');
     setMRate('3');
     setMAmount('');
+    setMWeightKg('');
     setMNote('');
   }
 
@@ -463,6 +473,7 @@ export default function HamaliLedger() {
     setMType(t);
     const meta = manualTypeMeta(t);
     if (meta.perBag) setMRate(String(meta.defaultRate ?? ''));
+    else if (meta.perTonne) setMRate(String(pappuTransferRate));
   }
 
   const createManual = useMutation({
@@ -471,7 +482,9 @@ export default function HamaliLedger() {
         method: 'POST',
         body: mMeta.perBag
           ? { date: mDate, type: mType, bags: Number(mBags), ratePerBag: Number(mRate), note: mNote || null }
-          : { date: mDate, type: mType, amount: Number(mAmount), note: mNote || null },
+          : mMeta.perTonne
+            ? { date: mDate, type: mType, weightKg: Math.round(Number(mWeightKg)), ratePerTonne: Number(mRate), note: mNote || null }
+            : { date: mDate, type: mType, amount: Number(mAmount), note: mNote || null },
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['manual-hamali-costs'] });
@@ -543,7 +556,11 @@ export default function HamaliLedger() {
     onError: (e: Error) => toast.error(getErrorMessage(e)),
   });
 
-  const manualValid = mMeta.perBag ? Number(mBags) > 0 && Number(mRate) > 0 : Number(mAmount) > 0;
+  const manualValid = mMeta.perBag
+    ? Number(mBags) > 0 && Number(mRate) > 0
+    : mMeta.perTonne
+      ? Number(mWeightKg) > 0 && Number(mRate) > 0
+      : Number(mAmount) > 0;
 
   const isLoading = loadingPurchases || loadingSales || loadingStockTransfers || loadingShellTransfers || loadingHuskTransfers;
 
@@ -854,7 +871,7 @@ export default function HamaliLedger() {
       party: '-',
       lorryOrBags: c.bags != null ? String(c.bags) : '-',
       referenceOrNote: c.note ?? '-',
-      netWeightKg: null,
+      netWeightKg: c.weightKg ?? null,
       fullCharge: null,
       ourShare: null,
       lorryShare: null,
@@ -2063,6 +2080,20 @@ export default function HamaliLedger() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="m-rate">Rate / Bag (₹)</Label>
+                  <Input id="m-rate" type="number" step="0.01" value={mRate} onChange={(e) => setMRate(e.target.value)} />
+                </div>
+              </div>
+            ) : mMeta.perTonne ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="m-weight">Weight (kg)</Label>
+                  <Input id="m-weight" type="number" min="0" value={mWeightKg} onChange={(e) => setMWeightKg(e.target.value)} placeholder="e.g. 25000" />
+                  {Number(mWeightKg) > 0 && (
+                    <p className="text-xs text-muted-foreground">{(Number(mWeightKg) / 1000).toFixed(3)} t</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="m-rate">Rate / Tonne (₹)</Label>
                   <Input id="m-rate" type="number" step="0.01" value={mRate} onChange={(e) => setMRate(e.target.value)} />
                 </div>
               </div>

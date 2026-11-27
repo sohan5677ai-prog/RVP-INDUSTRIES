@@ -1613,6 +1613,7 @@ enum ManualHamaliType {
   PAPPU_NET
   TPS_BROKENS_PACKING
   TAMARIND_BYPRODUCTS_PACKING
+  PAPPU_TRANSFER
   DIESEL
   TARBAL_FEE
   MISC
@@ -1626,7 +1627,10 @@ model ManualHamaliCost {
   type       ManualHamaliType
   bags       Int?
   ratePerBag Decimal?         @db.Decimal(8, 2)
-  amount     Decimal          @db.Decimal(12, 2) // per-bag: bags × ratePerBag; flat: entered directly
+  // Per-tonne charges (Pappu Transfer mill → storage): amount = weightKg/1000 × ratePerTonne
+  weightKg     Int?
+  ratePerTonne Decimal?       @db.Decimal(8, 2)
+  amount     Decimal          @db.Decimal(12, 2) // per-bag: bags × ratePerBag; per-tonne: t × rate; flat: entered directly
   note       String?
   createdBy  String?
   createdAt  DateTime         @default(now())

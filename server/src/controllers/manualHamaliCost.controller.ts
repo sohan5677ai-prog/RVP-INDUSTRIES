@@ -2,7 +2,8 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { LedgerService } from '../services/ledger.service.js';
-import { createManualHamaliCostSchema, PER_BAG_TYPES } from '../schemas/manualHamaliCost.schema.js';
+import { createManualHamaliCostSchema, PER_BAG_TYPES, PER_TONNE_TYPES } from '../schemas/manualHamaliCost.schema.js';
+import { getHamaliRate } from './settings.controller.js';
 
 const LABELS: Record<string, string> = {
   BAG_CUTTING_NORMAL: 'Bag Cutting (Place A)',
@@ -10,6 +11,7 @@ const LABELS: Record<string, string> = {
   PAPPU_NET: 'Pappu Net',
   TPS_BROKENS_PACKING: 'TPS Brokens Packing',
   TAMARIND_BYPRODUCTS_PACKING: 'Tamarind Byproducts Packing',
+  PAPPU_TRANSFER: 'Pappu Transfer (Mill → Storage)',
   TARBAL_FEE: 'Tarbal Fee',
   MISC: 'Hamali Miscellaneous',
   PAID: 'Paid to Hamali',
@@ -17,6 +19,7 @@ const LABELS: Record<string, string> = {
 };
 
 const isPerBag = (type: string) => (PER_BAG_TYPES as readonly string[]).includes(type);
+const isPerTonne = (type: string) => (PER_TONNE_TYPES as readonly string[]).includes(type);
 
 export async function listManualHamaliCosts(_req: Request, res: Response) {
   const costs = await prisma.manualHamaliCost.findMany({ orderBy: { date: 'desc' } });
@@ -38,12 +41,21 @@ export async function listManualHamaliCosts(_req: Request, res: Response) {
 export async function createManualHamaliCost(req: Request, res: Response) {
   const data = createManualHamaliCostSchema.parse(req.body);
   const perBag = isPerBag(data.type);
+  const perTonne = isPerTonne(data.type);
 
   const bags = perBag ? data.bags! : null;
   const ratePerBag = perBag ? data.ratePerBag! : null;
-  const amount = Math.round((perBag ? bags! * ratePerBag! : data.amount!) * 100) / 100;
+  const weightKg = perTonne ? data.weightKg! : null;
+  // Rate falls back to Settings → Hamali Rates (Pappu Transfer, default ₹270/t).
+  const ratePerTonne = perTonne ? (data.ratePerTonne ?? (await getHamaliRate('PAPPU_TRANSFER'))) : null;
+  const raw = perBag ? bags! * ratePerBag! : perTonne ? (weightKg! / 1000) * ratePerTonne! : data.amount!;
+  const amount = Math.round(raw * 100) / 100;
 
-  const detail = perBag ? `${bags} bags × ₹${ratePerBag}` : `₹${amount}`;
+  const detail = perBag
+    ? `${bags} bags × ₹${ratePerBag}`
+    : perTonne
+      ? `${(weightKg! / 1000).toFixed(3)} t × ₹${ratePerTonne}/t`
+      : `₹${amount}`;
 
   const cost = await prisma.$transaction(async (tx) => {
     const created = await tx.manualHamaliCost.create({
@@ -52,6 +64,8 @@ export async function createManualHamaliCost(req: Request, res: Response) {
         type: data.type,
         bags,
         ratePerBag,
+        weightKg,
+        ratePerTonne,
         amount,
         note: data.note ?? null,
         createdBy: req.user?.userId ?? null,

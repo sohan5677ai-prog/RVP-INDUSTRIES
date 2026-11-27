@@ -1630,6 +1630,10 @@ model ManualHamaliCost {
   // Per-tonne charges (Pappu Transfer mill → storage): amount = weightKg/1000 × ratePerTonne
   weightKg     Int?
   ratePerTonne Decimal?       @db.Decimal(8, 2)
+  // Pappu Transfer only: where the Pappu went and on which lorry. A PAPPU_TRANSFER
+  // row IS the transfer - the Stock → Pappu Stock page reads these as stock-in.
+  toLocation   String?
+  lorryNumber  String?
   amount     Decimal          @db.Decimal(12, 2) // per-bag: bags × ratePerBag; per-tonne: t × rate; flat: entered directly
   note       String?
   createdBy  String?

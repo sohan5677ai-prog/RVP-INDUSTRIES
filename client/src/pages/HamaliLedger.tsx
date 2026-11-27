@@ -141,14 +141,15 @@ function getRoundOptions(amount: number): { label: string; value: number }[] {
 // Manual hamali charge categories the crew is paid for but that can't be derived
 // from purchases/sales. Per-bag types compute amount = bags × rate; flat types
 // take a direct amount. Default per-bag rates match the mill's standard charges.
-const MANUAL_TYPES: { value: ManualHamaliType; label: string; perBag: boolean; perTonne?: boolean; defaultRate?: number }[] = [
+const MANUAL_TYPES: { value: ManualHamaliType; label: string; perBag: boolean; perTonne?: boolean; defaultRate?: number; recordElsewhere?: boolean }[] = [
   { value: 'BAG_CUTTING_NORMAL', label: 'Bag Cutting (Place A)', perBag: true, defaultRate: 3 },
   { value: 'BAG_CUTTING_DISTANCE', label: 'Bag Cutting (Place B)', perBag: true, defaultRate: 6 },
   { value: 'PAPPU_NET', label: 'Pappu Net', perBag: true, defaultRate: 3 },
   { value: 'TPS_BROKENS_PACKING', label: 'TPS Brokens Packing', perBag: true },
   { value: 'TAMARIND_BYPRODUCTS_PACKING', label: 'Tamarind Byproducts Packing', perBag: true },
   // Only the Pappu loads shifted mill → storage; rate from Settings → Hamali Rates.
-  { value: 'PAPPU_TRANSFER', label: 'Pappu Transfer (Mill → Storage)', perBag: false, perTonne: true, defaultRate: 270 },
+  // Recorded on Stock → Pappu Stock (it is also the stock movement), not in this dialog.
+  { value: 'PAPPU_TRANSFER', label: 'Pappu Transfer (Mill → Storage)', perBag: false, perTonne: true, defaultRate: 270, recordElsewhere: true },
   { value: 'TARBAL_FEE', label: 'Tarbal Fee', perBag: false },
   { value: 'MISC', label: 'Hamali Miscellaneous', perBag: false },
   { value: 'PAID', label: 'Paid to Hamali', perBag: false },
@@ -503,6 +504,7 @@ export default function HamaliLedger() {
       qc.invalidateQueries({ queryKey: ['manual-hamali-costs'] });
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['journal-entries'] });
+      qc.invalidateQueries({ queryKey: ['pappu-stock'] });
       toast.success('Charge removed');
     },
     onError: (e: Error) => toast.error(getErrorMessage(e)),
@@ -870,7 +872,9 @@ export default function HamaliLedger() {
       badgeVariant: (isManualDeduction(c.type) ? 'default' : 'outline') as UnifiedRow['badgeVariant'],
       party: '-',
       lorryOrBags: c.bags != null ? String(c.bags) : '-',
-      referenceOrNote: c.note ?? '-',
+      referenceOrNote: c.type === 'PAPPU_TRANSFER'
+        ? [c.toLocation ? `→ ${c.toLocation}` : null, c.lorryNumber, c.note].filter(Boolean).join(' · ') || '-'
+        : (c.note ?? '-'),
       netWeightKg: c.weightKg ?? null,
       fullCharge: null,
       ourShare: null,
@@ -2064,7 +2068,7 @@ export default function HamaliLedger() {
                 <Select value={mType} onValueChange={(v) => onTypeChange(v as ManualHamaliType)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {MANUAL_TYPES.map((m) => (
+                    {MANUAL_TYPES.filter((m) => !m.recordElsewhere).map((m) => (
                       <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
                     ))}
                   </SelectContent>

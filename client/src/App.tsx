@@ -63,6 +63,7 @@ const Verification = lazyWithPreload('/verification', () => import('@/pages/Veri
 const PappuCalculator = lazyWithPreload('/pappu-calculator', () => import('@/pages/PappuCalculator'));
 const StockLocation = lazyWithPreload('/stock/location', () => import('@/pages/StockLocation'));
 const StockTransfer = lazyWithPreload('/stock/transfer', () => import('@/pages/StockTransfer'));
+const PappuStock = lazyWithPreload('/stock/pappu', () => import('@/pages/PappuStock'));
 const BlackSeedStock = lazyWithPreload('/stock/overview', () => import('@/pages/BlackSeedStock'));
 const StockByDate = lazyWithPreload('/stock/date', () => import('@/pages/StockByDate'));
 const StockByParty = lazyWithPreload('/stock/party', () => import('@/pages/StockByParty'));
@@ -182,6 +183,7 @@ export default function App() {
                         <Route path="/stock/overview" element={<BlackSeedStock />} />
                         <Route path="/stock/location" element={<StockLocation />} />
                         <Route path="/stock/transfer" element={<StockTransfer />} />
+                        <Route path="/stock/pappu" element={<PappuStock />} />
                         <Route path="/stock/date" element={<StockByDate />} />
                         <Route path="/stock/party" element={<StockByParty />} />
                         <Route path="/stock/price" element={<StockByPrice />} />

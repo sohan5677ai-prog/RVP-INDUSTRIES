@@ -1089,6 +1089,8 @@ export interface ManualHamaliCost {
   ratePerBag: string | null;
   weightKg: number | null;
   ratePerTonne: string | null;
+  toLocation: string | null;
+  lorryNumber: string | null;
   amount: string;
   note: string | null;
   createdBy: string | null;
@@ -1617,4 +1619,38 @@ export interface VoidedInvoiceNumber {
   buyerName?: string | null;
   reason?: string | null;
   voidedAt: string;
+}
+
+/** Stock → Pappu Stock: a mill → storage transfer (it is also its ₹270/t hamali charge). */
+export interface PappuStockTransfer {
+  id: string;
+  date: string;
+  toLocation: string;
+  lorryNumber: string | null;
+  weightKg: number;
+  ratePerTonne: string | null;
+  hamaliAmount: string;
+  note: string | null;
+  soldKg: number;
+  remainingKg: number;
+  createdAt: string;
+}
+
+/** A Pappu sale lorry lifted (fully or partly) out of a storage. */
+export interface PappuStockSale {
+  id: string;
+  saleOrderId: string;
+  dispatchDate: string;
+  invoiceNumber: string | null;
+  vehicleNumber: string | null;
+  buyerName: string;
+  location: string;
+  fromStorageKg: number;
+  totalWeightKg: number;
+  status: string;
+}
+
+export interface PappuStockResponse {
+  transfers: PappuStockTransfer[];
+  sales: PappuStockSale[];
 }

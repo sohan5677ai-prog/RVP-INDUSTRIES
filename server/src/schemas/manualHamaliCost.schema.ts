@@ -35,6 +35,9 @@ export const createManualHamaliCostSchema = z
     ratePerTonne: z.coerce.number().positive().optional().nullable(),
     amount: z.coerce.number().positive().optional().nullable(),
     note: z.string().trim().optional().nullable(),
+    // Pappu Transfer only
+    toLocation: z.string().trim().max(80).optional().nullable(),
+    lorryNumber: z.string().trim().max(20).optional().nullable(),
   })
   .refine(
     (d) =>

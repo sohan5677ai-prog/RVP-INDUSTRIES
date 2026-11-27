@@ -16,6 +16,7 @@ import {
   Coins,
   Receipt,
   Warehouse,
+  Boxes,
   Calculator,
   MapPin,
   ArrowLeftRight,
@@ -111,6 +112,7 @@ const sections: NavSection[] = [
     heading: 'Stock',
     items: [
       { to: '/stock/overview', label: 'Black Seed Stock', icon: Warehouse },
+      { to: '/stock/pappu', label: 'Pappu Stock', icon: Boxes },
       { to: '/stock/price', label: 'Order Planner', icon: Tag },
       { to: '/stock/date', label: 'Stock by Date (FIFO)', icon: CalendarDays },
       { to: '/stock/location', label: 'Stock by Location (Band Price)', icon: MapPin },

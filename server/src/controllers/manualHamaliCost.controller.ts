@@ -39,7 +39,16 @@ export async function listManualHamaliCosts(_req: Request, res: Response) {
  *       Dr Hamali payable (20200) / Cr Cash-in-Hand (10410).
  */
 export async function createManualHamaliCost(req: Request, res: Response) {
-  const data = createManualHamaliCostSchema.parse(req.body);
+  const cost = await recordManualHamaliCost(req.body, req.user?.userId ?? null);
+  res.status(201).json(cost);
+}
+
+/**
+ * Shared create path - also used by Stock → Pappu Stock, where a PAPPU_TRANSFER
+ * row is both the stock movement (mill → storage) and its ₹270/t hamali charge.
+ */
+export async function recordManualHamaliCost(input: unknown, userId: string | null) {
+  const data = createManualHamaliCostSchema.parse(input);
   const perBag = isPerBag(data.type);
   const perTonne = isPerTonne(data.type);
 
@@ -56,8 +65,11 @@ export async function createManualHamaliCost(req: Request, res: Response) {
     : perTonne
       ? `${(weightKg! / 1000).toFixed(3)} t × ₹${ratePerTonne}/t`
       : `₹${amount}`;
+  const toLocation = perTonne ? (data.toLocation || null) : null;
+  const lorryNumber = perTonne && data.lorryNumber ? data.lorryNumber.toUpperCase() : null;
+  const where = toLocation ? ` → ${toLocation}` : '';
 
-  const cost = await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const created = await tx.manualHamaliCost.create({
       data: {
         date: data.date,
@@ -68,7 +80,9 @@ export async function createManualHamaliCost(req: Request, res: Response) {
         ratePerTonne,
         amount,
         note: data.note ?? null,
-        createdBy: req.user?.userId ?? null,
+        toLocation,
+        lorryNumber,
+        createdBy: userId,
       },
     });
 
@@ -86,25 +100,26 @@ export async function createManualHamaliCost(req: Request, res: Response) {
     await LedgerService.postJournalEntry(tx, {
       date: data.date,
       reference: `MANUAL-HAMALI-${created.id}`,
-      description: `${LABELS[data.type]} - ${detail}${data.note ? ` (${data.note})` : ''}`,
+      description: `${LABELS[data.type]}${where} - ${detail}${data.note ? ` (${data.note})` : ''}`,
       lines,
     });
 
     return created;
   });
-
-  res.status(201).json(cost);
 }
 
 /** Delete a manual hamali cost entry and reverse its GL posting. */
 export async function deleteManualHamaliCost(req: Request, res: Response) {
   const cost = await prisma.manualHamaliCost.findUnique({ where: { id: req.params.id } });
   if (!cost) throw new HttpError(404, 'Cost entry not found');
-
-  await prisma.$transaction(async (tx) => {
-    await tx.journalEntry.deleteMany({ where: { reference: `MANUAL-HAMALI-${cost.id}` } });
-    await tx.manualHamaliCost.delete({ where: { id: cost.id } });
-  });
-
+  await removeManualHamaliCost(cost.id);
   res.json({ message: 'Cost entry deleted' });
+}
+
+/** Delete one entry and its journal posting. */
+export async function removeManualHamaliCost(id: string) {
+  await prisma.$transaction(async (tx) => {
+    await tx.journalEntry.deleteMany({ where: { reference: `MANUAL-HAMALI-${id}` } });
+    await tx.manualHamaliCost.delete({ where: { id } });
+  });
 }

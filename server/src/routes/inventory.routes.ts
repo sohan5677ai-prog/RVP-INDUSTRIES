@@ -31,6 +31,12 @@ import {
   createHuskTransfer,
   deleteHuskTransfer,
 } from '../controllers/huskTransfer.controller.js';
+import {
+  getPappuStock,
+  createPappuTransfer,
+  updatePappuTransfer,
+  deletePappuTransfer,
+} from '../controllers/pappuStock.controller.js';
 
 const router = Router();
 
@@ -55,6 +61,11 @@ router.delete('/shell-transfers/:id', asyncHandler(deleteShellTransfer));
 router.get('/husk-transfers', asyncHandler(listHuskTransfers));
 router.post('/husk-transfers', asyncHandler(createHuskTransfer));
 router.delete('/husk-transfers/:id', asyncHandler(deleteHuskTransfer));
+
+router.get('/pappu-stock', asyncHandler(getPappuStock));
+router.post('/pappu-stock/transfers', asyncHandler(createPappuTransfer));
+router.patch('/pappu-stock/transfers/:id', asyncHandler(updatePappuTransfer));
+router.delete('/pappu-stock/transfers/:id', asyncHandler(deletePappuTransfer));
 
 router.get('/dust-purchases', asyncHandler(listDustPurchases));
 router.post('/dust-purchases', asyncHandler(createDustPurchase));

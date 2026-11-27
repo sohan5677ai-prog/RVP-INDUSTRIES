@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { Truck, PackageCheck, Upload, Loader2, FileText, Printer, ScrollText, ChevronRight, ShoppingCart, CalendarClock, IndianRupee, Undo2, TrendingUp, TrendingDown, Mail, Pencil, Eye, CheckCheck, AlertTriangle, Clock, Scale } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { api, getErrorMessage } from '@/lib/api';
-import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker, Transport, CompanyProfile, ProductTaxInfo, LorryConfirmation, InternalWeightRecord } from '@/lib/types';
+import type { SaleOrder, SaleStatus, SaleProduct, SaleDispatch, Party, Broker, Transport, CompanyProfile, ProductTaxInfo, LorryConfirmation, InternalWeightRecord, PappuStockResponse } from '@/lib/types';
 import { rupees, shortDate, toTonnes } from '@/lib/format';
 import {
   saleCloseToleranceKg,
@@ -186,7 +186,8 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   // Byproducts only (not Pappu/TPS): these get moved between locations via
   // StockTransfer/ShellTransfer/HuskTransfer, so a shipment can be sold either
   // straight off the factory or out of one of those transferred lots.
-  const offerFromTransfer = product !== 'PAPPU' && product !== 'TPS';
+  // Pappu too: lorries lifted from a storage draw down Stock → Pappu Stock.
+  const offerFromTransfer = product !== 'TPS';
   // Order row: ⌄ Date · Shipments · Party · [Broker] · Destination · Ordered ·
   // Dispatched · Remaining · Price · Status · Actions. Per-shipment detail lives
   // in the expandable panel.
@@ -277,6 +278,16 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
   const [transferMode, setTransferMode] = useState<'ALL' | 'SPLIT'>('ALL');
   const [transferTonnes, setTransferTonnes] = useState('');
   const [transferLocation, setTransferLocation] = useState<string>('PGR COLD');
+  // Pappu storages = the usual three plus any other name used on Stock → Pappu Stock.
+  const { data: pappuStock } = useQuery({
+    queryKey: ['pappu-stock'],
+    queryFn: () => api<PappuStockResponse>('/pappu-stock'),
+    enabled: isPappu,
+    staleTime: 60 * 1000,
+  });
+  const storageOptions: readonly string[] = isPappu
+    ? [...new Set([...BYPRODUCT_STORAGES, ...(pappuStock?.transfers ?? []).map((t) => t.toLocation).filter((l) => l !== 'Unassigned')])]
+    : BYPRODUCT_STORAGES;
 
   const { data: linkedKataTicket, isFetching: isMatchingKata } = useWeighbridgeMatch({
     date: dispatchOrder ? dispatchDate : undefined,
@@ -552,6 +563,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       qc.invalidateQueries({ queryKey: ['internal-weights'] });
       qc.invalidateQueries({ queryKey: ['husk-transfers'] });
       qc.invalidateQueries({ queryKey: ['shell-transfers'] });
+      qc.invalidateQueries({ queryKey: ['pappu-stock'] });
       toast.success('Dispatched - raise the invoice when ready');
       setDispatchOrder(null);
     },
@@ -595,6 +607,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
       qc.invalidateQueries({ queryKey: ['internal-weights'] });
       qc.invalidateQueries({ queryKey: ['husk-transfers'] });
       qc.invalidateQueries({ queryKey: ['shell-transfers'] });
+      qc.invalidateQueries({ queryKey: ['pappu-stock'] });
       toast.success('Dispatch undone - stock and ledger reversed');
       setUndoTarget(null);
     },
@@ -2069,7 +2082,7 @@ export default function SalesProduct({ product, hideHeader }: { product: SalePro
                           <SelectValue placeholder="Select storage location" />
                         </SelectTrigger>
                         <SelectContent>
-                          {BYPRODUCT_STORAGES.map((loc) => (
+                          {storageOptions.map((loc) => (
                             <SelectItem key={loc} value={loc} className="text-xs">
                               {loc}
                             </SelectItem>

@@ -36,6 +36,30 @@ It encrypts, then decrypts what it encrypted and compares, before writing anythi
 are only pruned after the new one is written and verified** — so a run of failures leaves you with
 old backups rather than none.
 
+### Register the nightly task (once, in an Administrator terminal)
+
+```
+schtasks /Create /TN "RVP Database Backup" /TR "C:\Users\SOHAN\Desktop\RVP-ERP\server\scripts\backup-nightly.cmd" /SC DAILY /ST 02:30 /RL HIGHEST
+```
+
+Check it afterwards:
+
+```
+schtasks /Query /TN "RVP Database Backup" /V /FO LIST
+```
+
+It appends to `%OneDrive%\RVP-Backups\backup.log`, so you can see whether it ran without opening
+Task Scheduler.
+
+Two things to know: **02:30 only fires if the PC is awake**, and a run takes about a minute. If the
+machine is often off overnight, move the time to something during the working day - a backup that
+runs at a dull hour beats one scheduled for an hour the PC is asleep.
+
+The wrapper is a `.cmd` rather than a long `schtasks /TR` string, because quoting a cd-and-run
+one-liner through Task Scheduler is the kind of thing that registers a task which silently never
+works. It resolves its own directory from `%~dp0`, so the task does not depend on a working
+directory.
+
 ### Check the config without taking one
 
 ```bash

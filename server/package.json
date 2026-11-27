@@ -30,12 +30,13 @@
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "express-rate-limit": "^8.5.2",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
-    "node-cron": "^3.0.3",
+    "node-cron": "^4.6.0",
     "otpauth": "^9.6.0",
     "pdf-lib": "^1.17.1",
     "pdfkit": "^0.19.1",
@@ -44,7 +45,6 @@
     "serialport": "^13.0.0",
     "sharp": "^0.35.4",
     "winston": "^3.19.0",
-    "xlsx": "^0.18.5",
     "zod": "^3.24.1"
   },
   "devDependencies": {

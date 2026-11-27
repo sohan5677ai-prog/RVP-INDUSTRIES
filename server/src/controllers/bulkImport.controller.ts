@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import * as XLSX from 'xlsx';
+import { sheetBufferToCsv } from '../lib/spreadsheet.js';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../lib/httpError.js';
 import { extractBulkTableFromText, extractBulkTableFromImage, type BulkTableRow } from '../lib/gemini.js';
@@ -16,9 +16,10 @@ export async function parseBulkImport(req: Request, res: Response) {
   if (file) {
     const ext = file.originalname.split('.').pop()?.toLowerCase() ?? '';
     if (ext === 'xlsx' || ext === 'csv' || ext === 'xls') {
-      const wb = XLSX.read(file.buffer);
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const csv = XLSX.utils.sheet_to_csv(ws);
+      // Via exceljs, not xlsx: SheetJS carries an unfixable HIGH
+      // prototype-pollution advisory and this parses user uploads.
+      // See lib/spreadsheet.ts - legacy .xls now gets a clear refusal.
+      const csv = await sheetBufferToCsv(file.buffer, ext);
       rows = await extractBulkTableFromText(csv, type);
     } else {
       // Image (jpg, png, webp, pdf screenshot, etc.)

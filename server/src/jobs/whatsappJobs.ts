@@ -1,4 +1,4 @@
-import cron from 'node-cron';
+import cron, { type ScheduledTask } from 'node-cron';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { whatsappService, type OwnerWeeklyStats, type ProductWeekStats } from '../services/whatsapp.service.js';
@@ -948,7 +948,7 @@ export function buildCron(hour: number, minute: number, days: number[]): string 
 
 // In-process ScheduledTask per job, so a schedule change can stop the old
 // timer and start a new one without restarting the server.
-const scheduledTasks = new Map<string, cron.ScheduledTask>();
+const scheduledTasks = new Map<string, ScheduledTask>();
 
 function scheduleJob(job: OwnerDigestJobMeta, cronExpr: string) {
   scheduledTasks.get(job.jobKey)?.stop();

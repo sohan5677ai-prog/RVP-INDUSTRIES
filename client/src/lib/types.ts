@@ -1075,6 +1075,7 @@ export type ManualHamaliType =
   | 'PAPPU_NET'
   | 'TPS_BROKENS_PACKING'
   | 'TAMARIND_BYPRODUCTS_PACKING'
+  | 'PAPPU_TRANSFER'
   | 'TARBAL_FEE'
   | 'MISC'
   | 'PAID'
@@ -1086,6 +1087,8 @@ export interface ManualHamaliCost {
   type: ManualHamaliType;
   bags: number | null;
   ratePerBag: string | null;
+  weightKg: number | null;
+  ratePerTonne: string | null;
   amount: string;
   note: string | null;
   createdBy: string | null;

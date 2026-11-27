@@ -61,6 +61,9 @@ export const HAMALI_RATE_KEYS = [
   'TPS_LOADING',
   'SHELL_TRANSFER',
   'WASTE_LOADING',
+  // Pappu mill → storage handling. Fixed (not custom), so it is NOT added to
+  // every Pappu sale - it is only charged when recorded on the Hamali page.
+  'PAPPU_TRANSFER',
 ] as const;
 type HamaliRateKey = (typeof HAMALI_RATE_KEYS)[number];
 
@@ -79,6 +82,7 @@ const HAMALI_RATE_DEFAULTS: Record<HamaliRateKey, HamaliDefault> = {
   TPS_LOADING: { label: 'TPS (Brokens) Loading', ratePerTonne: 160, lorryPerTonne: 160, marginPerTonne: 0, sortOrder: 4 },
   SHELL_TRANSFER: { label: 'Tamarind Shell Transfer', ratePerTonne: 333, lorryPerTonne: 0, marginPerTonne: 0, sortOrder: 5 },
   WASTE_LOADING: { label: 'Tamarind Waste Loading', ratePerTonne: 150, lorryPerTonne: 0, marginPerTonne: 0, sortOrder: 6 },
+  PAPPU_TRANSFER: { label: 'Pappu Transfer (Mill → Storage)', ratePerTonne: 270, lorryPerTonne: 0, marginPerTonne: 0, sortOrder: 7 },
 };
 
 /** Return all hamali rate rows (fixed + custom), lazily creating missing fixed ones from defaults. */

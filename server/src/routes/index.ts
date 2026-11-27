@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
 import fileRoutes from './file.routes.js';
+import securityRoutes from './security.routes.js';
 import { requireMediaRead } from '../middleware/mediaAuth.js';
 import { enforceRoutePermissions } from '../middleware/routePermission.js';
 import { isOriginAllowed, originPolicyFromEnv } from '../lib/corsOrigin.js';
@@ -212,6 +213,7 @@ const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 router.post('/bulk-import/parse', bulkImportLimiter, memUpload.single('file'), asyncHandler(parseBulkImport));
 
 router.use('/parties', partyRoutes);
+router.use('/security', securityRoutes);
 router.use('/brokers', brokerRoutes);
 router.use('/transports', transportRoutes);
 router.use('/', purchaseRoutes);

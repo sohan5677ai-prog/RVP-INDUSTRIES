@@ -262,6 +262,12 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   { methods: READ, path: '/period-locks*', permission: 'audit.view' },
   { methods: 'ALL', path: '/period-locks*', permission: 'system.manage' },
   { methods: READ, path: '/system*', permission: 'system.view' },
+  // The security page. Reading is audit.view, the same grant that reads the
+  // audit trail; acknowledging an alert or forcing a check is system.manage.
+  // Order matters - the WRITE rule has to come first or the READ rule would
+  // claim every method on the path.
+  { methods: WRITE, path: '/security*', permission: 'system.manage' },
+  { methods: READ, path: '/security*', permission: 'audit.view' },
   { methods: 'ALL', path: '/system*', permission: 'system.manage' },
   { methods: READ, path: '/archive*', permission: 'archive.view' },
   { methods: 'ALL', path: '/archive*', permission: 'archive.manage' },

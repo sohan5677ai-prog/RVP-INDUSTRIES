@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
-import { verifyAuditChain } from '../services/audit.service.js';
+import { verifyAuditChain, recordAudit } from '../services/audit.service.js';
 import { raiseAlert, resolveAlerts } from '../services/securityAlert.service.js';
 import {
   evaluateAll,
@@ -99,10 +99,48 @@ export async function runSecurityMonitor(now: Date = new Date()): Promise<{
     if (!firing.has(rule)) resolved += await resolveAlerts(rule);
   }
 
+  await recordChainHeartbeat(signals, now);
+
   if (raised > 0 || resolved > 0) {
     logger.info(`[security-monitor] raised ${raised}, cleared ${resolved}`);
   }
   return { raised, resolved };
+}
+
+/**
+ * Leave a record that the chain was checked, so the page can tell "verified
+ * and fine" from "never checked".
+ *
+ * Not every run: hourly would add 8,760 rows a year to the trail this is
+ * meant to keep readable, which is the mistake made twice already. Once every
+ * twelve hours is enough for a heartbeat - and a FAILURE is recorded
+ * immediately, because that one is evidence rather than a heartbeat.
+ */
+const CHAIN_HEARTBEAT_HOURS = 12;
+
+async function recordChainHeartbeat(signals: Signals, now: Date): Promise<void> {
+  try {
+    if (signals.chain.ok) {
+      const last = await prisma.auditLog.findFirst({
+        where: { action: 'audit.verify' },
+        orderBy: { seq: 'desc' },
+        select: { createdAt: true },
+      });
+      const hours = last ? (now.getTime() - last.createdAt.getTime()) / 3600_000 : Infinity;
+      if (hours < CHAIN_HEARTBEAT_HOURS) return;
+    }
+    await recordAudit({
+      action: 'audit.verify',
+      newValues: {
+        ok: signals.chain.ok,
+        checked: signals.chain.checked,
+        failures: signals.chain.failures,
+        by: 'security-monitor',
+      },
+    });
+  } catch (err) {
+    logger.warn('[security-monitor] could not record the chain check', err);
+  }
 }
 
 export function registerSecurityMonitorCron(): void {

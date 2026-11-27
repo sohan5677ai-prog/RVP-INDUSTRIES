@@ -49,6 +49,7 @@ import {
   Keyboard,
   Search,
   History,
+  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
@@ -193,6 +194,8 @@ const sections: NavSection[] = [
       { to: '/users', label: 'Users', icon: Shield },
       // Behind audit.view on the server, which USER does not hold.
       { to: '/audit-trail', label: 'Audit trail', icon: History, roles: ['DEVELOPER', 'ADMIN', 'OWNER'] },
+      // Same grant as the audit trail: reading it needs audit.view.
+      { to: '/security', label: 'Security', icon: ShieldCheck, roles: ['DEVELOPER', 'ADMIN', 'OWNER'] },
       // Licensing and financial-year archives are developer-only tooling - an
       // admin should never see, let alone open, either one.
       { to: '/settings?tab=subscription', label: 'Subscription', icon: CreditCard, devOnly: true },
